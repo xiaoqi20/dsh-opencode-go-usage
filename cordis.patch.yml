@@ -1,0 +1,13 @@
+# dsh-opencode-go-usage bundle layer: one plugin row.
+# Declaring `dsh.bundle.patch` lets `dsh plugin --profile <name> add <pkg>`
+# wire this package into the profile's bundle layers automatically, so no
+# manual patch edit is required.
+#
+# Override config example (write into $DSH_HOME/profiles/<name>/cordis.patch.yml):
+#   - id: opencode-go-usage
+#     config:
+#       baseUrl: https://opencode.ai/zen/go/v1/usage
+#       timeoutMs: 15000
+- insert:
+    - id: opencode-go-usage
+      name: dsh-opencode-go-usage
