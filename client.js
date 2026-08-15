@@ -93,6 +93,36 @@ window.__ModuleLoader__.load({
       button: { alignSelf: "flex-start", border: "1px solid var(--dsw-alias-border-l2)", color: "var(--dsw-alias-label-primary)", font: "inherit", cursor: "pointer", background: "transparent", borderRadius: 6, padding: "5px 12px" },
     };
 
+    // Compact readout for the composer dock (the band below the input box).
+    const dockStyles = {
+      pill: { position: "relative", display: "flex", alignItems: "center", gap: 6, fontSize: 11, lineHeight: "16px", color: "var(--dsw-alias-label-tertiary)", cursor: "pointer", userSelect: "none", padding: "2px 8px", borderRadius: 8, whiteSpace: "nowrap" },
+      dot: { width: 6, height: 6, borderRadius: "50%", flex: "none" },
+      dotOk: { background: "var(--dsw-alias-state-success-primary)" },
+      dotWarn: { background: "var(--dsw-alias-state-warn-primary)" },
+      dotErr: { background: "var(--dsw-alias-state-error-primary)" },
+      text: { fontVariantNumeric: "tabular-nums" },
+      panel: { position: "absolute", bottom: "calc(100% + 8px)", left: "50%", transform: "translateX(-50%)", zIndex: 60, background: "color-mix(in srgb, var(--dsw-specific-menu) 88%, transparent)", backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 12, boxShadow: "var(--dsw-shadow-lv3)", padding: "10px 14px", minWidth: 280, maxWidth: "min(420px, calc(100vw - 48px))", fontSize: 12 },
+      pRow: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, lineHeight: "20px" },
+      pLabel: { color: "var(--dsw-alias-label-secondary)" },
+      pValue: { fontVariantNumeric: "tabular-nums", color: "var(--dsw-alias-label-primary)", fontWeight: 500 },
+      pBar: { height: 5, borderRadius: 3, background: "var(--dsw-alias-bg-layer-1)", overflow: "hidden", marginTop: 2 },
+      pFill: { height: "100%", borderRadius: 3, background: "var(--dsw-alias-state-business-primary)", transition: "width .2s ease" },
+      err: { color: "var(--dsw-alias-state-error-primary)" },
+    };
+
+    function dockDot(percent) {
+      if (percent === null) return dockStyles.dotErr;
+      if (percent >= 80) return dockStyles.dotErr;
+      if (percent >= 50) return dockStyles.dotWarn;
+      return dockStyles.dotOk;
+    }
+
+    const WINDOW_KEYS = [
+      { key: "rolling", labelKey: "rolling", limit: LIMITS.rolling, short: "5h" },
+      { key: "weekly", labelKey: "weekly", limit: LIMITS.weekly, short: "周" },
+      { key: "monthly", labelKey: "monthly", limit: LIMITS.monthly, short: "月" },
+    ];
+
     function fmtReset(resetsAt, t) {
       if (!resetsAt) return t("unknown");
       const d = new Date(resetsAt);
@@ -181,6 +211,87 @@ window.__ModuleLoader__.load({
       );
     }
 
+    // One-line usage readout rendered in the composer dock (below the input
+    // box, next to the shipped stats line). Collapsed it shows the three
+    // windows' percent used; clicking toggles a small glass panel with bars.
+    function DockPill(props) {
+      const { query, t } = props;
+      const [state, setState] = React.useState({ kind: "loading" });
+      const [open, setOpen] = React.useState(false);
+
+      const load = React.useCallback(() => {
+        setState((prev) => (prev.kind === "done" ? prev : { kind: "loading" }));
+        Promise.resolve()
+          .then(() => query())
+          .then((result) => {
+            if (!result || result.ok === false) {
+              setState({ kind: "failure", message: (result && result.error && result.error.message) || "remote failed" });
+              return;
+            }
+            setState({ kind: "done", value: result.value });
+          })
+          .catch((e) => setState({ kind: "failure", message: String((e && e.message) || e) }));
+      }, [query]);
+
+      React.useEffect(() => {
+        load();
+        const id = setInterval(load, 60000);
+        return () => clearInterval(id);
+      }, [load]);
+
+      const value = state.kind === "done" ? state.value || {} : null;
+      const windows = value && value.configured === true && !value.error && value.usage ? value.usage : null;
+
+      let label = "OC-GO …";
+      let dotStyle = dockStyles.dotErr;
+      if (windows) {
+        const parts = WINDOW_KEYS.map(({ key, short }) => {
+          const w = windows[key];
+          const pct = w && typeof w.percent === "number" ? Math.round(w.percent) : null;
+          return short + (pct === null ? "–" : pct + "%");
+        });
+        label = "OC-GO " + parts.join(" · ");
+        const worst = Math.max(0, ...WINDOW_KEYS.map(({ key }) => (windows[key] && typeof windows[key].percent === "number" ? windows[key].percent : 0)));
+        dotStyle = dockDot(worst);
+      } else if (value && value.configured === true && value.error) {
+        label = "OC-GO " + t("unknown");
+      }
+
+      return React.createElement("div", { style: dockStyles.pill }, [
+        open
+          ? React.createElement("div", { key: "panel", style: dockStyles.panel },
+            React.createElement("div", { style: dockStyles.pRow },
+              React.createElement("span", { style: dockStyles.pLabel }, t("title")),
+              React.createElement("span", { style: { ...dockStyles.dot, ...dotStyle } })
+            ),
+            windows
+              ? WINDOW_KEYS.map(({ key, labelKey, limit }) => {
+                  const w = windows[key];
+                  const pct = w && typeof w.percent === "number" ? Math.max(0, Math.min(100, w.percent)) : 0;
+                  const pctShow = w && typeof w.percent === "number" ? Math.round(w.percent) + "%" : t("unknown");
+                  return React.createElement("div", { key, style: { marginTop: 6 } },
+                    React.createElement("div", { style: dockStyles.pRow },
+                      React.createElement("span", { style: dockStyles.pLabel }, t(labelKey) + " · " + limit),
+                      React.createElement("span", { style: dockStyles.pValue }, pctShow)
+                    ),
+                    React.createElement("div", { style: dockStyles.pBar },
+                      React.createElement("div", { style: { ...dockStyles.pFill, width: pct + "%" } })
+                    )
+                  );
+                })
+              : React.createElement("div", { style: { ...dockStyles.err, marginTop: 4 } }, t("loading")),
+          )
+          : null,
+        React.createElement("span", {
+          key: "label",
+          style: dockStyles.text,
+          onClick: () => setOpen(!open),
+          title: t("title"),
+          "aria-expanded": open,
+        }, label),
+      ]);
+    }
+
     function apply(ctx) {
       const mountReady = ctx.remote.$mount(TYPERT_REMOTE);
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), "opencode-go-usage: dictionaries");
@@ -202,6 +313,15 @@ window.__ModuleLoader__.load({
         locale: NS,
         inject: injected,
       }, UsagePanel));
+
+      // Also surface the same quota in the composer dock (the band below the
+      // input box), so it is visible without opening Settings.
+      ctx.slots.inject("conversation.composer.dock", () => ctx.slots.register({
+        name: "conversation.composer.dock",
+        id: "oc-usage",
+        order: 120,
+        inject: injected,
+      }, DockPill));
     }
 
     exports.NS = NS;
